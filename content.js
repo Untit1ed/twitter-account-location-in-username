@@ -70,7 +70,7 @@ async function loadCache() {
       // Filter out expired entries and null entries (allow retry)
       for (const [username, data] of Object.entries(cached)) {
         if (data.expiry && data.expiry > now && data.location !== null) {
-          locationCache.set(username, data.location);
+          locationCache.set(username, [data.location, data.location_accurate, data.source]);
         }
       }
       console.log(`Loaded ${locationCache.size} cached locations (excluding null entries)`);
@@ -99,9 +99,13 @@ async function saveCache() {
     const now = Date.now();
     const expiry = now + (CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
-    for (const [username, location] of locationCache.entries()) {
+    for (let [username, data] of locationCache.entries()) {
+      let [location, location_accurate, source] = data;
+
       cacheObj[username] = {
         location: location,
+        location_accurate: location_accurate,
+        source: source,
         expiry: expiry,
         cachedAt: now
       };
@@ -120,14 +124,14 @@ async function saveCache() {
 }
 
 // Save a single entry to cache
-async function saveCacheEntry(username, location) {
+async function saveCacheEntry(username, location, location_accurate, source) {
   // Check if extension context is still valid
   if (!chrome.runtime?.id) {
     console.log('Extension context invalidated, skipping cache entry save');
     return;
   }
 
-  locationCache.set(username, location);
+  locationCache.set(username, [location, location_accurate, source]);
   // Debounce saves - only save every 5 seconds
   if (!saveCache.timeout) {
     saveCache.timeout = setTimeout(async () => {
@@ -226,16 +230,18 @@ function makeLocationRequest(screenName) {
         event.data.requestId === requestId) {
         window.removeEventListener('message', handler);
         const location = event.data.location;
+        const location_accurate = event.data.location_accurate;
         const isRateLimited = event.data.isRateLimited || false;
+        const source = event.data.source || null;
 
         // Only cache if not rate limited (don't cache failures due to rate limiting)
         if (!isRateLimited) {
-          saveCacheEntry(screenName, location || null);
+          saveCacheEntry(screenName, location || null, location_accurate || false, source || null);
         } else {
           console.log(`Not caching null for ${screenName} due to rate limit`);
         }
-
-        resolve(location || null);
+        debugger
+        resolve([location || null, location_accurate || false, source || null]);
       }
     };
     window.addEventListener('message', handler);
@@ -252,7 +258,7 @@ function makeLocationRequest(screenName) {
       window.removeEventListener('message', handler);
       // Don't cache timeout failures - allow retry
       console.log(`Request timeout for ${screenName}, not caching`);
-      resolve(null);
+      resolve([null, false]);
     }, 10000);
   });
 }
@@ -493,7 +499,7 @@ async function addFlagToUsername(usernameElement, screenName) {
     console.log(`Processing flag for ${screenName}...`);
 
     // Get location
-    const location = await getUserLocation(screenName);
+    const [location, location_accurate, source] = await getUserLocation(screenName);
     console.log(`Location for ${screenName}:`, location);
 
     // Remove shimmer
@@ -502,8 +508,7 @@ async function addFlagToUsername(usernameElement, screenName) {
     }
 
     if (!location) {
-      console.log(`No location found for ${screenName}, marking as failed`);
-      usernameElement.dataset.flagAdded = 'failed';
+      usernameElement.dataset.flagAdded = 'true'; // Mark as done even if no location (verified accounts have no location)
       return;
     }
 
@@ -604,14 +609,15 @@ async function addFlagToUsername(usernameElement, screenName) {
 
     // Add flag emoji - place it next to verification badge, before @ handle
     const flagSpan = document.createElement('span');
-    flagSpan.textContent = ` ${location}`;
-    flagSpan.title = location;
+    let source_location = source.replace(" Android App", '').replace(" App Store", '')
+    flagSpan.textContent = ` ${location_accurate ? location : source_location} `;
+    flagSpan.title = ` ${location} @ ${source || 'unknown source'}`;
     flagSpan.setAttribute('data-twitter-flag', 'true');
     flagSpan.style.margin = '0 4px';
     flagSpan.style.padding = '0 2px';
     flagSpan.style.borderRadius = '2px';
     flagSpan.style.fontSize = '60%';
-    flagSpan.style.backgroundColor = 'blue';
+    flagSpan.style.backgroundColor = location_accurate ? 'blue' : 'red';
     flagSpan.style.display = 'inline';
     flagSpan.style.color = 'white';
     flagSpan.style.verticalAlign = 'middle';
@@ -711,7 +717,7 @@ async function addFlagToUsername(usernameElement, screenName) {
     if (inserted) {
       // Mark as processed
       usernameElement.dataset.flagAdded = 'true';
-      console.log(`✓ Successfully added flag ${flag} for ${screenName} (${location})`);
+      console.log(`✓ Successfully added ${screenName} (${location})`);
 
       // Also mark any other containers waiting for this username
       const waitingContainers = document.querySelectorAll(`[data-flag-added="waiting"]`);
