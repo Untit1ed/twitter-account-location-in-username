@@ -1,90 +1,87 @@
-# Twitter Account Location Flag Chrome Extension
+# Twitter Account Location Display Chrome Extension
 
-A Chrome extension that displays country flag emojis next to Twitter/X usernames based on the account's location information.
+A Chrome extension that shows account location text next to Twitter/X usernames. This fork expands the original "flag" behavior to also detect likely VPN/proxy locations and show the app/store source the account appears to be using (Web, Android, iOS/App Store, etc.).
 
 ## Features
 
 - Automatically detects usernames on Twitter/X pages
-- Queries Twitter's GraphQL API to get account location information
-- Displays the corresponding country flag emoji next to usernames
+- Queries Twitter's GraphQL API to read an account's declared location and source metadata
+- Displays the account's location as inline text next to the username (instead of flag emoji)
+- Attempts to surface whether the location looks like a VPN/proxy-derived location
+- Shows the app/store source the account activity comes from when available (e.g. `Web`, `Android App`, `App Store`)
 - Works with dynamically loaded content (infinite scroll)
-- Caches location data to minimize API calls
+- Caches location and source data to minimize API calls and reduce rate-limit pressure
 
 ## Installation
 
 1. Clone or download this repository
 2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable "Developer mode" (toggle in the top right)
-4. Click "Load unpacked"
+3. Enable `Developer mode` (toggle in the top right)
+4. Click `Load unpacked`
 5. Select the directory containing this extension
 6. The extension will now be active on Twitter/X pages
 
 ## How It Works
 
-1. The extension runs a content script on all Twitter/X pages
-2. It identifies username elements in tweets and user profiles
-3. For each username, it queries Twitter's GraphQL API endpoint (`AboutAccountQuery`) to get the account's location
-4. The location is mapped to a flag emoji using the country flags mapping
-5. The flag emoji is displayed next to the username
+1. The extension injects a small page script that can reuse the logged-in user's session to query Twitter's GraphQL API (`AboutAccountQuery`).
+2. The content script scans tweets and user cells for usernames and asks the page script for location/source data.
+3. The page script makes the API requests and returns structured data including `account_based_in` (location), `location_accurate` and `source`.
+4. The content script inserts a small inline label next to the username showing the location or the inferred source information.
 
 ## Files
 
 - `manifest.json` - Chrome extension configuration
-- `content.js` - Main content script that processes the page and injects page scripts for API calls
-- `countryFlags.js` - Country name to flag emoji mapping
+- `content.js` - Main content script that processes the page and injects `pageScript.js` for API calls
+- `pageScript.js` - Runs in page context to capture headers and perform GraphQL requests
+- `popup.html` / `popup.js` - Extension UI for toggling the feature
 - `README.md` - This file
-
-## Technical Details
-
-The extension uses a page script injection approach to make API requests. This allows it to:
-- Access the same cookies and authentication as the logged-in user
-- Make same-origin requests to Twitter's API without CORS issues
-- Work seamlessly with Twitter's authentication system
-
-The content script injects a script into the page context that listens for location fetch requests. When a username is detected, the content script sends a custom event to the page script, which makes the API request and returns the location data.
 
 ## API Endpoint
 
 The extension uses Twitter's GraphQL API endpoint:
+
 ```
 https://x.com/i/api/graphql/XRqGa7EeokUU5kppkh13EA/AboutAccountQuery
 ```
 
 With variables:
+
 ```json
 {
   "screenName": "username"
 }
 ```
 
-The response contains `account_based_in` field in:
+The response contains location information at:
+
 ```
 data.user_result_by_screen_name.result.about_profile.account_based_in
 ```
 
+and additional metadata such as `location_accurate` and `source` when available.
+
 ## Limitations
 
 - Requires the user to be logged into Twitter/X
-- Only works for accounts that have location information available
-- Country names must match the mapping in `countryFlags.js` (case-insensitive)
-- Rate limiting may apply if making too many requests
+- Only works for accounts that have location information available in their About profile
+- Location inference is best-effort — VPNs, proxies, and user-provided text may be misleading
+- Rate limiting may apply if making many requests; the extension caches results to reduce calls
 
 ## Privacy
 
-- The extension only queries public account information
-- No data is stored or transmitted to third-party servers
-- All API requests are made directly to Twitter/X servers
-- Location data is cached locally in memory
+- The extension only queries Twitter/X directly from your browser using your session
+- No location data is transmitted to third-party servers by this extension
+- Location and source metadata are cached locally using Chrome extension storage to reduce API calls
 
 ## Troubleshooting
 
-If flags are not appearing:
+If location labels are not appearing:
+
 1. Make sure you're logged into Twitter/X
-2. Check the browser console for any error messages
-3. Verify that the account has location information available
-4. Try refreshing the page
+2. Check the browser console for errors from `content.js` or `pageScript.js`
+3. Verify that the account has location information in their profile
+4. The extension may be rate-limited; wait a short while and try again
 
 ## License
 
 MIT
-

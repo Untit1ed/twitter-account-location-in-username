@@ -85,7 +85,8 @@
 
   // Listen for fetch requests from content script via postMessage
   window.addEventListener('message', async function(event) {
-    // Only accept messages from our extension
+    // Only accept messages from the same window context and our extension
+    if (event.source !== window) return;
     if (event.data && event.data.type === '__fetchLocation') {
       const { screenName, requestId } = event.data;
 
@@ -184,7 +185,8 @@
           location: null,
           location_accurate: false,
           source: null,
-          requestId
+          requestId,
+          isRateLimited: false
         }, '*');
       }
     }

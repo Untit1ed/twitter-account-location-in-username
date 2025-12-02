@@ -47,7 +47,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         processUsernames();
       }, 500);
     } else {
-      // Remove all flags if disabled
+      // Remove all location labels if disabled
       removeAllFlags();
     }
   }
@@ -240,7 +240,6 @@ function makeLocationRequest(screenName) {
         } else {
           console.log(`Not caching null for ${screenName} due to rate limit`);
         }
-        debugger
         resolve([location || null, location_accurate || false, source || null]);
       }
     };
@@ -268,12 +267,12 @@ async function getUserLocation(screenName) {
   // Check cache first
   if (locationCache.has(screenName)) {
     const cached = locationCache.get(screenName);
-    // Don't return cached null - retry if it was null before (might have been rate limited)
-    if (cached !== null) {
-      console.log(`Using cached location for ${screenName}: ${cached}`);
+    // cached is expected to be [location, location_accurate, source]
+    if (cached && cached[0] !== null && cached[0] !== undefined) {
+      console.log(`Using cached location for ${screenName}: ${cached[0]}`);
       return cached;
     } else {
-      console.log(`Found null in cache for ${screenName}, will retry API call`);
+      console.log(`Found null/empty location in cache for ${screenName}, will retry API call`);
       // Remove from cache to allow retry
       locationCache.delete(screenName);
     }
@@ -406,7 +405,7 @@ function findHandleSection(container, screenName) {
 // Create loading shimmer placeholder
 function createLoadingShimmer() {
   const shimmer = document.createElement('span');
-  shimmer.setAttribute('data-twitter-flag-shimmer', 'true');
+  shimmer.setAttribute('data-twitter-location-shimmer', 'true');
   shimmer.style.display = 'inline-block';
   shimmer.style.width = '20px';
   shimmer.style.height = '16px';
@@ -419,9 +418,9 @@ function createLoadingShimmer() {
   shimmer.style.animation = 'shimmer 1.5s infinite';
 
   // Add animation keyframes if not already added
-  if (!document.getElementById('twitter-flag-shimmer-style')) {
+  if (!document.getElementById('twitter-location-shimmer-style')) {
     const style = document.createElement('style');
-    style.id = 'twitter-flag-shimmer-style';
+    style.id = 'twitter-location-shimmer-style';
     style.textContent = `
       @keyframes shimmer {
         0% {
@@ -438,16 +437,16 @@ function createLoadingShimmer() {
   return shimmer;
 }
 
-// Function to add flag to username element
-async function addFlagToUsername(usernameElement, screenName) {
-  // Check if flag already added
+// Function to add location label to username element
+async function addLocationToUsername(usernameElement, screenName) {
+  // Check if location label already added
   if (usernameElement.dataset.flagAdded === 'true') {
     return;
   }
 
   // Check if this username is already being processed (prevent duplicate API calls)
   if (processingUsernames.has(screenName)) {
-    // Wait a bit and check if flag was added by the other process
+    // Wait a bit and check if a location label was added by the other process
     await new Promise(resolve => setTimeout(resolve, 500));
     if (usernameElement.dataset.flagAdded === 'true') {
       return;
@@ -469,7 +468,7 @@ async function addFlagToUsername(usernameElement, screenName) {
   let shimmerInserted = false;
 
   if (userNameContainer) {
-    // Try to insert shimmer before handle section (same place flag will go)
+    // Try to insert shimmer before handle section (same place location label will go)
     const handleSection = findHandleSection(userNameContainer, screenName);
     if (handleSection && handleSection.parentNode) {
       try {
@@ -496,7 +495,7 @@ async function addFlagToUsername(usernameElement, screenName) {
   }
 
   try {
-    console.log(`Processing flag for ${screenName}...`);
+    console.log(`Processing location for ${screenName}...`);
 
     // Get location
     const [location, location_accurate, source] = await getUserLocation(screenName);
@@ -596,10 +595,10 @@ async function addFlagToUsername(usernameElement, screenName) {
 
     console.log(`Found username link for ${screenName}:`, usernameLink.href, usernameLink.textContent?.trim());
 
-    // Check if flag already exists (check in the entire container, not just parent)
-    const existingFlag = usernameElement.querySelector('[data-twitter-flag]');
+    // Check if location label already exists (check in the entire container, not just parent)
+    const existingFlag = usernameElement.querySelector('[data-twitter-location]');
     if (existingFlag) {
-      // Remove shimmer if flag already exists
+      // Remove shimmer if location label already exists
       if (shimmerInserted && shimmerSpan.parentNode) {
         shimmerSpan.remove();
       }
@@ -607,25 +606,28 @@ async function addFlagToUsername(usernameElement, screenName) {
       return;
     }
 
-    // Add flag emoji - place it next to verification badge, before @ handle
-    const flagSpan = document.createElement('span');
-    let source_location = source.replace(" Android App", '').replace(" App Store", '')
-    flagSpan.textContent = ` ${location_accurate ? location : source_location} `;
-    flagSpan.title = ` ${location} @ ${source || 'unknown source'}`;
-    flagSpan.setAttribute('data-twitter-flag', 'true');
-    flagSpan.style.margin = '0 4px';
-    flagSpan.style.padding = '0 2px';
-    flagSpan.style.borderRadius = '2px';
-    flagSpan.style.fontSize = '60%';
-    flagSpan.style.backgroundColor = location_accurate ? 'blue' : 'red';
-    flagSpan.style.display = 'inline';
-    flagSpan.style.color = 'white';
-    flagSpan.style.verticalAlign = 'middle';
+    // Add location label - place it next to verification badge, before @ handle
+    const locationSpan = document.createElement('span');
+    // Normalize source safely (source may be null)
+    const normalizedSource = (source || '').replace(/ Android App$| App Store$/i, '').trim();
+    // Prefer showing location when available; otherwise show normalized source or 'unknown'
+    const displayText = location ? location : (normalizedSource || 'unknown');
+    locationSpan.textContent = ` ${displayText} `;
+    locationSpan.title = `${location || 'unknown location'} @ ${normalizedSource || 'unknown source'}`;
+    locationSpan.setAttribute('data-twitter-location', 'true');
+    locationSpan.style.margin = '0 4px';
+    locationSpan.style.padding = '0 2px';
+    locationSpan.style.borderRadius = '2px';
+    locationSpan.style.fontSize = '60%';
+    locationSpan.style.backgroundColor = location_accurate ? 'blue' : 'red';
+    locationSpan.style.display = 'inline';
+    locationSpan.style.color = 'white';
+    locationSpan.style.verticalAlign = 'middle';
 
     // Use userNameContainer found above, or find it if not found
-    const containerForFlag = userNameContainer || usernameElement.querySelector('[data-testid="UserName"], [data-testid="User-Name"]');
+    const containerForLabel = userNameContainer || usernameElement.querySelector('[data-testid="UserName"], [data-testid="User-Name"]');
 
-    if (!containerForFlag) {
+    if (!containerForLabel) {
       console.error(`Could not find UserName container for ${screenName}`);
       // Remove shimmer on error
       if (shimmerInserted && shimmerSpan.parentNode) {
@@ -636,21 +638,21 @@ async function addFlagToUsername(usernameElement, screenName) {
     }
 
     // Find the verification badge (SVG with data-testid="icon-verified")
-    const verificationBadge = containerForFlag.querySelector('[data-testid="icon-verified"]');
+    const verificationBadge = containerForLabel.querySelector('[data-testid="icon-verified"]');
 
     // Find the handle section - the div that contains the @username link
     // The structure is: User-Name > div (display name) > div (handle section with @username)
-    const handleSection = findHandleSection(containerForFlag, screenName);
+    const handleSection = findHandleSection(containerForLabel, screenName);
 
     let inserted = false;
 
     // Strategy 1: Insert right before the handle section div (which contains @username)
     // The handle section is a direct child of User-Name container
-    if (handleSection && handleSection.parentNode === containerForFlag) {
+    if (handleSection && handleSection.parentNode === containerForLabel) {
       try {
-        containerForFlag.insertBefore(flagSpan, handleSection);
+        containerForLabel.insertBefore(locationSpan, handleSection);
         inserted = true;
-        console.log(`✓ Inserted flag before handle section for ${screenName}`);
+        console.log(`✓ Inserted location label before handle section for ${screenName}`);
       } catch (e) {
         console.log('Failed to insert before handle section:', e);
       }
@@ -661,15 +663,15 @@ async function addFlagToUsername(usernameElement, screenName) {
       try {
         // Insert before the handle section's parent (if it's not User-Name)
         const handleParent = handleSection.parentNode;
-        if (handleParent !== containerForFlag && handleParent.parentNode) {
-          handleParent.parentNode.insertBefore(flagSpan, handleParent);
+        if (handleParent !== containerForLabel && handleParent.parentNode) {
+          handleParent.parentNode.insertBefore(locationSpan, handleParent);
           inserted = true;
-          console.log(`✓ Inserted flag before handle parent for ${screenName}`);
-        } else if (handleParent === containerForFlag) {
+          console.log(`✓ Inserted location label before handle parent for ${screenName}`);
+        } else if (handleParent === containerForLabel) {
           // Handle section is direct child, insert before it
-          containerForFlag.insertBefore(flagSpan, handleSection);
+          containerForLabel.insertBefore(locationSpan, handleSection);
           inserted = true;
-          console.log(`✓ Inserted flag before handle section (direct child) for ${screenName}`);
+          console.log(`✓ Inserted location label before handle section (direct child) for ${screenName}`);
         }
       } catch (e) {
         console.log('Failed to insert before handle parent:', e);
@@ -680,21 +682,21 @@ async function addFlagToUsername(usernameElement, screenName) {
     if (!inserted && handleSection) {
       try {
         // Find the display name link (first link)
-        const displayNameLink = containerForFlag.querySelector('a[href^="/"]');
+        const displayNameLink = containerForLabel.querySelector('a[href^="/"]');
         if (displayNameLink) {
           // Find the div that contains the display name link
           const displayNameContainer = displayNameLink.closest('div');
-          if (displayNameContainer && displayNameContainer.parentNode) {
+            if (displayNameContainer && displayNameContainer.parentNode) {
             // Check if handle section is a sibling
             if (displayNameContainer.parentNode === handleSection.parentNode) {
-              displayNameContainer.parentNode.insertBefore(flagSpan, handleSection);
+              displayNameContainer.parentNode.insertBefore(locationSpan, handleSection);
               inserted = true;
-              console.log(`✓ Inserted flag between display name and handle (siblings) for ${screenName}`);
+              console.log(`✓ Inserted location label between display name and handle (siblings) for ${screenName}`);
             } else {
               // Try inserting after display name container
-              displayNameContainer.parentNode.insertBefore(flagSpan, displayNameContainer.nextSibling);
+              displayNameContainer.parentNode.insertBefore(locationSpan, displayNameContainer.nextSibling);
               inserted = true;
-              console.log(`✓ Inserted flag after display name container for ${screenName}`);
+              console.log(`✓ Inserted location label after display name container for ${screenName}`);
             }
           }
         }
@@ -706,30 +708,30 @@ async function addFlagToUsername(usernameElement, screenName) {
     // Strategy 4: Insert at the end of User-Name container (fallback)
     if (!inserted) {
       try {
-        containerForFlag.appendChild(flagSpan);
+        containerForLabel.appendChild(locationSpan);
         inserted = true;
-        console.log(`✓ Inserted flag at end of UserName container for ${screenName}`);
+        console.log(`✓ Inserted location label at end of UserName container for ${screenName}`);
       } catch (e) {
-        console.error('Failed to append flag to User-Name container:', e);
+        console.error('Failed to append location label to User-Name container:', e);
       }
     }
 
     if (inserted) {
       // Mark as processed
       usernameElement.dataset.flagAdded = 'true';
-      console.log(`✓ Successfully added ${screenName} (${location})`);
+      console.log(`✓ Successfully added location for ${screenName}: ${location}`);
 
       // Also mark any other containers waiting for this username
       const waitingContainers = document.querySelectorAll(`[data-flag-added="waiting"]`);
       waitingContainers.forEach(container => {
         const waitingUsername = extractUsername(container);
         if (waitingUsername === screenName) {
-          // Try to add flag to this container too
-          addFlagToUsername(container, screenName).catch(() => { });
+            // Try to add location label to this container too
+              addLocationToUsername(container, screenName).catch(() => { });
         }
       });
     } else {
-      console.error(`✗ Failed to insert flag for ${screenName} - tried all strategies`);
+      console.error(`✗ Failed to insert location label for ${screenName} - tried all strategies`);
       console.error('Username link:', usernameLink);
       console.error('Parent structure:', usernameLink.parentNode);
       // Remove shimmer on failure
@@ -739,7 +741,7 @@ async function addFlagToUsername(usernameElement, screenName) {
       usernameElement.dataset.flagAdded = 'failed';
     }
   } catch (error) {
-    console.error(`Error processing flag for ${screenName}:`, error);
+    console.error(`Error processing location for ${screenName}:`, error);
     // Remove shimmer on error
     if (shimmerInserted && shimmerSpan.parentNode) {
       shimmerSpan.remove();
@@ -751,22 +753,22 @@ async function addFlagToUsername(usernameElement, screenName) {
   }
 }
 
-// Function to remove all flags (when extension is disabled)
+// Function to remove all location labels (when extension is disabled)
 function removeAllFlags() {
-  const flags = document.querySelectorAll('[data-twitter-flag]');
-  flags.forEach(flag => flag.remove());
+  const labels = document.querySelectorAll('[data-twitter-location]');
+  labels.forEach(label => label.remove());
 
   // Also remove any loading shimmers
-  const shimmers = document.querySelectorAll('[data-twitter-flag-shimmer]');
+  const shimmers = document.querySelectorAll('[data-twitter-location-shimmer]');
   shimmers.forEach(shimmer => shimmer.remove());
 
-  // Reset flag added markers
+  // Reset location-added markers
   const containers = document.querySelectorAll('[data-flag-added]');
   containers.forEach(container => {
     delete container.dataset.flagAdded;
   });
 
-  console.log('Removed all flags');
+  console.log('Removed all location labels');
 }
 
 // Function to process all username elements on the page
@@ -793,7 +795,7 @@ async function processUsernames() {
       if (!status || status === 'failed') {
         processedCount++;
         // Process in parallel but limit concurrency
-        addFlagToUsername(container, screenName).catch(err => {
+        addLocationToUsername(container, screenName).catch(err => {
           console.error(`Error processing ${screenName}:`, err);
           container.dataset.flagAdded = 'failed';
         });
@@ -838,7 +840,7 @@ function initObserver() {
 
     if (shouldProcess) {
       // Debounce processing
-      setTimeout(processUsernames, 500);
+      setTimeout(processUsernames, 3000);
     }
   });
 
@@ -850,7 +852,7 @@ function initObserver() {
 
 // Main initialization
 async function init() {
-  console.log('Twitter Location Flag extension initialized');
+  console.log('Twitter Location Display extension initialized');
 
   // Load enabled state first
   await loadEnabledState();
